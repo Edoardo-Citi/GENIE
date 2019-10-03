@@ -1,0 +1,444 @@
+#include <cstdio>
+#include <stdio.h>
+#include <stdlib.h>
+#include <iostream>
+#include <string>
+#include <TH1.h>
+#include <TF1.h>
+#include <TCanvas.h>
+#include <TRandom3.h>
+#include <TMinuit.h>
+#include <TFile.h>
+#include "TFile.h"
+#include "TGraphErrors.h"
+#include "TStyle.h"
+#include "TMath.h"
+#include "TMatrixDSym.h"
+#include "TFitResult.h"
+#include "TString.h"
+#include <fstream>
+#include <string>
+#include <cmath>
+#include <TRandom2.h>
+#include <TRandom3.h>
+#include <TRandom.h>
+#include <TFitResultPtr.h>
+#include <RConfig.h>
+#include <TStopwatch.h>
+#include <TLegend.h>
+#include <TH3D.h>
+
+
+
+double    P_max = 2;            //Upper bound for P1 in GeV
+int    A = 12;      //C12
+double DB = 0.033;      //Binding energy
+double    P2_min = 0;           //Lower bound for P2
+int       nbins = 100;          //Number of bins  of the PR Wavefunction file
+int       nbinsp1 = 10000;         //Number of bins for the P1 Spectrum
+int       nbinsp2 = 10000;         //Number of bins for the P2 Spectrum
+int       nbinse = 10000;         //Number of bins for the Energy Spectrum
+double    sigma_P_CM = 0.143;   //In GeV
+double    kf = 0.221;           //Fermi momentum in GeV
+double    m=0.939;              //Mass of the nucleon in GeV
+double    P2_max = (2*m - DB)*(2*m - DB) - m*m;
+
+
+
+void SF_p1_e1_p2_lite(){
+    TStopwatch * Clock1 = new TStopwatch();     //Just a feature to measure the running time
+        TH1::AddDirectory(kFALSE);
+
+TFile f1("Contact_formalism.root", "RECREATE");
+    
+    // I open the file with the Wave Function Squared and save it into arrays
+    ifstream myfile;
+    myfile.open("all.txt");
+    double k[100], phi2_nn[100], phi2_pn0[100], phi2_pn1[100];
+    int i=0, j=0;
+    
+    for(i=0;i<100;i++){
+        myfile >> k[i];
+       k[i] = k[i] * (TMath::H()) * TMath::C() * 1e6/ (TMath::Qe()) / 2/ TMath::Pi(); // Conversion from fm^(-1) to GeV/c
+        myfile >> phi2_nn[i];
+        myfile >> phi2_pn0[i];
+        myfile >> phi2_pn1[i];
+    }
+    myfile.close();
+    
+    //Open the histogram and start working for the wavefunction
+    
+    TH1D* histo_p_nn = new TH1D("|#phi_{(P_{R})}|^{2}","|#phi_{(P_{R})}|^{2}",nbins,k[0]/2,k[nbins-1]+k[0]/2);
+    TH1D* histo_p_pn0 = new TH1D("histo_p_pn0","histo_p_pn0",nbins,k[0]/2,k[nbins-1]+k[0]/2);
+    TH1D* histo_p_pn1 = new TH1D("histo_p_pn1","histo_p_pn1",nbins,k[0]/2,k[nbins-1]+k[0]/2);
+    
+    for(i=0;i<100;i++){
+            histo_p_nn->Fill(k[i],phi2_nn[i]);
+            histo_p_pn0->Fill(k[i],phi2_pn0[i]);
+            histo_p_pn1->Fill(k[i],phi2_pn1[i]);
+    }
+    
+   //  Normalization and drawing
+    
+    TCanvas* canvas1 = new TCanvas("phi2","phi2",0);
+    canvas1->SetLogy();
+    canvas1 -> cd();
+
+    
+    
+    histo_p_nn->Scale(1/histo_p_nn->Integral(),"width");
+    histo_p_nn->GetXaxis()->SetTitle("P_{R} (GeV/c)");
+    histo_p_nn->GetYaxis()->SetTitle("|#phi_{(P_{R})}|^{2} (a.u)");
+    histo_p_nn->Draw("L HIST");
+    
+    
+    histo_p_pn0->Scale(1/histo_p_pn0->Integral(),"width");
+    histo_p_pn0->SetLineColor(2);
+    histo_p_pn0->Draw("same L HIST");
+    
+    histo_p_pn1->Scale(1/histo_p_pn1->Integral(),"width");
+    histo_p_pn1->SetLineColor(8);
+    histo_p_pn1->Draw("same L HIST");
+    
+    TLegend* legend = new TLegend(0.6,0.7,0.9,0.9);
+    legend->SetTextSize(.02);
+    legend->SetHeader("Wavefunction squared for relative momentum","C"); // option "C" allows to center the header
+    legend->AddEntry(histo_p_nn,"NN");
+    legend->AddEntry(histo_p_pn0,"PN Singlet");
+    legend->AddEntry(histo_p_pn1,"PN Triplet");
+    legend->Draw();
+    
+    //Creation of the 3D distrivution
+    
+    
+
+    
+    TH1D*   Histo_PR_nn     = new TH1D("PR_nn","P_{R}",1000,0,2);
+    Histo_PR_nn->GetXaxis()->SetTitle("P_{R} (GeV/c)");
+    Histo_PR_nn->GetYaxis()->SetTitle("S_{P_{R}} (a.u)");
+    
+    TH1D*   Histo_PCM_nn    = new TH1D("PCM_nn","P_{CM}",1000,0, 5 * sigma_P_CM);
+    Histo_PCM_nn->GetXaxis()->SetTitle("P_{CM} (GeV/c)");
+    Histo_PCM_nn->GetYaxis()->SetTitle("S_{P_{CM}} (a.u)");
+    
+    TH1D*   Histo_Cos_theta_nn    = new TH1D("Cos_Theta_nn","Cos#theta",1000,-1, 1);
+    Histo_Cos_theta_nn->GetXaxis()->SetTitle("Cos#theta");
+    Histo_Cos_theta_nn->GetYaxis()->SetTitle("S_{P_{Cos#theta}} (a.u)");
+    
+    //For the Energy and angle plots
+    TH1D* Histo_E1_nn = new TH1D("#epsilon1","#epsilon1",nbinse,0,m);
+    Histo_E1_nn->SetTitle("#epsilon1");
+    Histo_E1_nn->GetXaxis()->SetTitle("#epsilon1 (GeV)");
+    Histo_E1_nn->GetYaxis()->SetTitle("S_{#epsilon1} (a.u)");
+    
+    //For the momentum
+    TH1D* Histo_p1_nn = new TH1D("P1","P1",nbinsp1,0,P_max);
+    Histo_p1_nn->SetTitle("P_{1}");
+    Histo_p1_nn->GetXaxis()->SetTitle("P_{1} (GeV/c)");
+    Histo_p1_nn->GetYaxis()->SetTitle("S_{P_{1}} (a.u)");
+    
+    TH1D* Histo_p2_nn = new TH1D("P2","P2",nbinsp2,P2_min,P_max+1.8);
+    Histo_p2_nn->SetTitle("P_{2}");
+    Histo_p2_nn->GetXaxis()->SetTitle("P_{2} (GeV/c)");
+    Histo_p2_nn->GetYaxis()->SetTitle("S_{P_{2}} (a.u)");
+    
+    
+    /*
+    TH1D*   Histo_PR_pn0     = new TH1D("PR_pn0","PR_pn0",nbins,k[0]/2,k[nbins-1]+k[0]/2);
+    TH1D*   Histo_PCM_pn0    = new TH1D("PCM_pn0","PCM_pn0",100,0, 5 * sigma_P_CM);
+    TH1D*   Histo_Cos_theta_pn0    = new TH1D("Cos_Theta_pn0","Cos_Theta_pn0",100,-1, 1);
+    
+    TH1D*   Histo_PR_pn1     = new TH1D("PR_pn1","PR_pn1",nbins,k[0]/2,k[nbins-1]+k[0]/2);
+    TH1D*   Histo_PCM_pn1    = new TH1D("PCM_pn1","PCM_pn1",100,0, 5 * sigma_P_CM);
+    TH1D*   Histo_Cos_theta_pn1    = new TH1D("Cos_Theta_pn1","Cos_Theta_pn1",100,-1, 1);
+    */
+    
+    //Definitions of variable and functions
+    double dp1 =(P_max)/(double)nbinsp1; //* (TMath::H()) * TMath::C() * 1e6/ (TMath::Qe()) / 2/ TMath::Pi();
+    double dp2 = (P_max-P2_min+1.8)/(double)nbinsp2;
+    double dE1  = m/(double)nbinse;
+    double P_R2 =0;
+    double E1 = 0, p1 = 0, p2 =0;
+    double P_CM2 = 0;
+    double Cos_Theta_num = 0;   //Numerator of the Cos theta expression
+    double Weight_nn = 0, Weight_pn0 = 0, Weight_pn1 = 0;
+
+    
+    int p1_i=0 ,E1_i=0 ,p2_i=0, E1_start=0, E1_stop =0,p2_stop=0;
+    
+    for(p1_i=0; p1_i<nbinsp1; p1_i++){
+        p2=0;
+    p1 = dp1 * ((double)(p1_i + 0.5));
+       // p2_stop = ((p1-P2_min)/dp2)+1;                               //I require p2<p1
+        if(p2_stop>nbinsp2){p2_stop = nbinsp2;}
+        cout << p1_i << endl;
+        
+        
+           for(p2_i=0; p2_i<nbinsp2; p2_i++){
+               E1=0;
+        p2 = dp2 * ((double)(p2_i + 0.5)) + P2_min;
+               
+               //Kinematic bounds on energy
+               
+               E1_start = (2 * m - sqrt(p2*p2 + m*m) -DB - (p1 +p2 )*(p1 + p2)/(2*m*(A-2)))/dE1;
+               
+               if (E1_start<0){E1_start=0;}
+               
+               E1_stop =  (2 * m  - sqrt(p2*p2 + m*m) - DB) / dE1;
+               //cout<<E1_start*dE1<<endl;
+               if(E1_stop>nbinse){E1_stop=nbinse;}
+            
+                   for(E1_i=E1_start; E1_i<=E1_stop+1; E1_i++){
+ 
+               E1 = dE1 * ((double)(E1_i + 0.5));
+                        
+                        P_CM2 = 2 * m * (A-2) * (2 * m - E1 - sqrt(p2*p2 + m*m) - DB);
+                        
+                        P_R2 = (p1*p1 +p2 *p2  - P_CM2/2)/2;
+                        
+                       Cos_Theta_num = (P_CM2 - p1*p1 -p2*p2);
+                        
+                        //Kinematics bounds
+                        
+                       if (P_CM2 <=0 || Cos_Theta_num < -(2*p1*p2) || Cos_Theta_num  > 2*p1*p2 || P_R2<(kf*kf) ||sqrt(P_R2)>1.8){
+                            Weight_nn = 0;        //Not in domain
+                            Weight_pn0 = 0;
+                            Weight_pn1 = 0;
+                            //Histo_Missed ->Fill(Cos_Theta_num);
+                            
+                        }
+                        else {
+                            
+                            //Here lays the Physics
+                            
+
+                            
+                            Weight_nn = p2/p1 * m  * (histo_p_nn -> Interpolate((sqrt(P_R2)))) / (  sigma_P_CM* sigma_P_CM* sigma_P_CM) * TMath::Exp((-1)*P_CM2/(2* sigma_P_CM*sigma_P_CM) );
+                            /*
+                            Weight_pn0 = p2/p1 * m * (histo_p_pn0 -> GetBinContent((int)(sqrt(P_R2)/k[0]+0.5))) / (  sigma_P_CM* sigma_P_CM* sigma_P_CM) * TMath::Exp((-1)*P_CM2/(2* sigma_P_CM*sigma_P_CM));
+                            
+                            Weight_pn1 = p2/p1 * m  * (histo_p_pn1 -> GetBinContent((int)(sqrt(P_R2)/k[0]+0.5))) / (  sigma_P_CM* sigma_P_CM* sigma_P_CM) * TMath::Exp((-1)*P_CM2/(2* sigma_P_CM*sigma_P_CM));
+                            */
+
+                        }
+                        
+
+                       Histo_E1_nn-> Fill(E1,Weight_nn);
+                        Histo_p1_nn-> Fill(p1,Weight_nn);
+                        Histo_p2_nn-> Fill(p2,Weight_nn);
+                        Histo_PR_nn -> Fill(sqrt(P_R2),Weight_nn);
+                        Histo_PCM_nn -> Fill(sqrt(P_CM2),Weight_nn);
+                        Histo_Cos_theta_nn -> Fill(Cos_Theta_num/(2*p1*p2),Weight_nn);
+                       
+                       /*
+                       Histo_PR_pn0 -> Fill(sqrt(P_R2),Weight_pn0);
+                       Histo_PCM_pn0 -> Fill(sqrt(P_CM2),Weight_pn0);
+                       Histo_Cos_theta_pn0 -> Fill(Cos_Theta_num/(2*p1*p2),Weight_pn0);
+                       
+                       Histo_PR_pn1 -> Fill(sqrt(P_R2),Weight_pn1);
+                       Histo_PCM_pn1 -> Fill(sqrt(P_CM2),Weight_pn1);
+                       Histo_Cos_theta_pn1 -> Fill(Cos_Theta_num/(2*p1*p2),Weight_pn1);
+                        */
+                        
+                    }
+            }
+    }
+    
+    //Normalizations
+    Histo_PR_nn->Scale(1/Histo_PR_nn->Integral(),"width");
+   // Histo_PR_pn0->Scale(1/Histo_PR_pn0->Integral(),"width");
+    //Histo_PR_pn1->Scale(1/Histo_PR_pn1->Integral(),"width");
+    
+    Histo_PCM_nn->Scale(1/Histo_PCM_nn->Integral(),"width");
+   // Histo_PCM_pn0->Scale(1/Histo_PCM_pn0->Integral(),"width");
+    //Histo_PCM_pn1->Scale(1/Histo_PCM_pn1->Integral(),"width");
+    
+    Histo_Cos_theta_nn->Scale(1/Histo_Cos_theta_nn->Integral(),"width");
+    //Histo_Cos_theta_pn0->Scale(1/Histo_Cos_theta_pn0->Integral(),"width");
+    //Histo_Cos_theta_pn1->Scale(1/Histo_Cos_theta_pn1->Integral(),"width");
+    
+    Histo_E1_nn -> Scale (1/Histo_E1_nn->Integral(),"width");
+    //Histo_E1_pn0 -> Scale (1/Histo_E1_pn0->Integral(),"width");
+    //Histo_E1_pn1 -> Scale (1/Histo_E1_pn1->Integral(),"width");
+    
+    Histo_p1_nn -> Scale (1/Histo_p1_nn->Integral(),"width");
+    //Histo_P1_pn0 -> Scale (1/Histo_P1_pn0->Integral(),"width");
+    //Histo_P1_pn1 -> Scale (1/Histo_P1_pn1->Integral(),"width");
+    
+    Histo_p2_nn -> Scale (1/Histo_p2_nn->Integral(),"width");
+    //Histo_P2_pn0 -> Scale (1/Histo_P2_pn0->Integral(),"width");
+    //Histo_P2_pn1 -> Scale (1/Histo_P2_pn1->Integral(),"width");
+    
+    
+    
+    TCanvas* canvas2 = new TCanvas("Energy and Theta","Energy and Theta",0);
+    canvas2 -> Divide (1,2);
+    canvas2 -> cd(1);
+    gPad ->SetLogy();
+        gStyle ->SetOptStat(""); //For Drawing options
+    
+    //Histo_E1_pn0 ->SetLineColor(2);
+    //Histo_E1_pn1 ->SetLineColor(8);
+    
+    Histo_E1_nn -> Draw(" HIST");
+    //Histo_E1_pn0 -> Draw("same  HIST");
+    //Histo_E1_pn1 -> Draw("same  HIST");
+    
+    
+    TLegend* legendE = new TLegend(0.1,0.7,0.5,0.9);
+    legendE->SetTextSize(.02);
+    legendE->SetHeader("Distribution for E1","C"); // option "C" allows to center the header
+    legendE->AddEntry(Histo_E1_nn,"NN");
+    //legendE->AddEntry(Histo_E1_pn0,"PN Singlet");
+    //legendE->AddEntry(Histo_E1_pn1,"PN Triplet");
+  //  legendE->Draw();
+    
+    canvas2 -> cd(2);
+    gPad ->SetLogy();
+    
+    //Histo_Cos_theta_pn0 ->SetLineColor(2);
+    //Histo_Cos_theta_pn1 ->SetLineColor(8);
+    
+    Histo_Cos_theta_nn -> Draw(" HIST");
+    //Histo_Cos_theta_pn0 -> Draw("same  HIST");
+    //Histo_Cos_theta_pn1 -> Draw("same  HIST");
+    
+    
+    
+    
+    TLegend* legendtheta = new TLegend(0.5,0.7,0.9,0.9);
+        legendtheta->SetTextSize(.02);
+    legendtheta->SetHeader("Distribution for Cos Theta","C"); // option "C" allows to center the header
+    legendtheta->AddEntry(Histo_Cos_theta_nn,"NN");
+    //legendtheta->AddEntry(Histo_Cos_theta_pn0,"PN Singlet");
+    //legendtheta->AddEntry(Histo_Cos_theta_pn1,"PN Triplet");
+   // legendtheta->Draw();
+    
+    TCanvas* canvas3 = new TCanvas("Momentum","Momentum",0);
+    canvas3 -> Divide (2,2);
+    canvas3 -> cd (1);
+        gPad ->SetLogy();
+
+    
+
+    
+    //Histo_p1_pn0 ->SetLineColor(2);
+    //Histo_p1_pn1 ->SetLineColor(8);
+    
+    Histo_p1_nn -> Draw(" HIST");
+    //Histo_p1_pn0 -> Draw("same  HIST");
+    //Histo_p1_pn1 -> Draw("same  HIST");
+    
+    
+    TLegend* legendp1 = new TLegend(0.6,0.7,0.9,0.9);
+        legendp1->SetTextSize(.02);
+    legendp1->SetHeader("Distribution p1","C"); // option "C" allows to center the header
+    legendp1->AddEntry(Histo_p1_nn,"NN");
+    //legendp1->AddEntry(Histo_p1_pn0,"PN Singlet");
+    //legendp1->AddEntry(Histo_p1_pn1,"PN Triplet");
+    //legendp1->Draw();
+    
+    canvas3 -> cd (2);
+     gPad    ->SetLogy();
+    
+
+    
+    //TH1D* Histo_p2_pn0 = Histo_SF_pn0->ProjectionY("Histo_p2_pn0",0,-1,0,-1);
+    //TH1D* Histo_p2_pn1 = Histo_SF_pn1->ProjectionY("Histo_p2_pn1",0,-1,0,-1);
+    
+    //Histo_p2_pn0 ->SetLineColor(2);
+    //Histo_p2_pn1 ->SetLineColor(8);
+    
+    Histo_p2_nn -> Draw("HIST");
+    //Histo_p2_pn0 -> Draw("same  HIST");
+    //Histo_p2_pn1 -> Draw("same  HIST");
+    
+    
+    TLegend* legendp2 = new TLegend(0.6,0.7,0.9,0.9);
+        legendp2->SetTextSize(.02);
+    legendp2->SetHeader("Distribution p2","C"); // option "C" allows to center the header
+    legendp2->AddEntry(Histo_p2_nn,"NN");
+    //legendp2->AddEntry(Histo_p2_pn0,"PN Singlet");
+    //legendp2->AddEntry(Histo_p2_pn1,"PN Triplet");
+   // legendp2->Draw();
+    
+    canvas3 -> cd (3);
+    gPad    ->SetLogy();
+    
+   // Histo_PR_pn0 ->SetLineColor(2);
+    //Histo_PR_pn1 ->SetLineColor(8);
+    
+    Histo_PR_nn -> Draw("HIST");
+   // Histo_PR_pn0 -> Draw("same  HIST");
+   // Histo_PR_pn1 -> Draw("same  HIST");
+    
+    TLegend* legendPR = new TLegend(0.6,0.7,0.9,0.9);
+        legendPR->SetTextSize(.02);
+    legendPR->SetHeader("Distribution for PR","C"); // option "C" allows to center the header
+    legendPR->AddEntry(Histo_PR_nn,"NN");
+   // legendPR->AddEntry(Histo_PR_pn0,"PN Singlet");
+    //legendPR->AddEntry(Histo_PR_pn1,"PN Triplet");
+    //legendPR->Draw();
+    
+    canvas3 -> cd (4);
+    gPad    ->SetLogy();
+    
+   // Histo_PCM_pn0 ->SetLineColor(2);
+   // Histo_PCM_pn1 ->SetLineColor(8);
+    
+    Histo_PCM_nn -> Draw("HIST");
+   // Histo_PCM_pn0 -> Draw("same  HIST");
+   // Histo_PCM_pn1 -> Draw("same  HIST");
+    
+    
+    TLegend* legendPCM = new TLegend(0.6,0.7,0.9,0.9);
+        legendPCM->SetTextSize(.02);
+    legendPCM->SetHeader("Distribution for PCM","C"); // option "C" allows to center the header
+    legendPCM->AddEntry(Histo_PR_nn,"NN");
+   // legendPCM->AddEntry(Histo_PR_pn0,"PN Singlet");
+   // legendPCM->AddEntry(Histo_PR_pn1,"PN Triplet");
+    //legendPCM->Draw();
+    
+    /* Debug feature
+    TCanvas* canvasM = new TCanvas("M","M",0);
+    canvasM->SetLogy();
+    canvasM -> cd();
+    
+    Histo_Missed->Draw();*/
+    
+    
+    
+    //Saving in root file
+    Histo_SF_nn -> Write("3D_Spectral_Function_nn");
+    Histo_p1_nn -> Write("P1_nn_3_lite");
+    Histo_p2_nn -> Write("P2_nn_3_lite");
+    Histo_E1_nn -> Write("E1_nn_3_lite");
+    Histo_PR_nn -> Write("PR_nn_3_lite");
+    Histo_PCM_nn-> Write("PCM_nn_3_lite");
+    Histo_Cos_theta_nn -> Write("Cos_theta_nn_3_lite");
+    
+    
+    /*
+   // Histo_SF_pn0 -> Write("3D_Spectral_Function_pn0");
+    Histo_p1_pn0 -> Write("P1_pn0_3");
+    Histo_p2_pn0 -> Write("P2_pn0_3");
+    Histo_E1_pn0 -> Write("E1_pn0_3");
+    Histo_PR_pn0 -> Write("PR_pn0_3");
+    Histo_PCM_pn0-> Write("PCM_pn0_3");
+    Histo_Cos_theta_pn0 -> Write("Cos_theta_pn0_3");
+    
+   // Histo_SF_pn1 -> Write("3D_Spectral_Function_pn1");
+    Histo_p1_pn1 -> Write("P1_pn1_3");
+    Histo_p2_pn1 -> Write("P2_pn1_3");
+    Histo_E1_pn1 -> Write("E1_pn1_3");
+    Histo_PR_pn1 -> Write("PR_pn1_3");
+    Histo_PCM_pn1-> Write("PCM_pn1_3");
+    Histo_Cos_theta_pn1 -> Write("Cos_theta_pn1_3");
+    */
+    f1.Close();
+    
+    
+    cout << "executed in: " << Clock1->RealTime()<< " s" << endl;
+
+    
+}
